@@ -1,0 +1,92 @@
+volumes:
+  db_data:
+  kafka_data:
+
+services:
+  orders:
+    container_name: orders_service
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${SERVER_PORT}:${SERVER_PORT}"
+    environment:
+      DB_HOST: "${DB_HOST}"
+      DB_PORT: "${DB_PORT}"
+      DB_USER: "${DB_USER}"
+      DB_PASSWORD: "${DB_PASSWORD}"
+      DB_NAME: "${DB_NAME}"
+      DB_SSLMODE: "${DB_SSLMODE}"
+      SERVER_PORT: "${SERVER_PORT}"
+      LOG_CONFIG: "${LOG_CONFIG}"
+      KAFKA_TOPIC: "${KAFKA_TOPIC}"
+      KAFKA_GROUP: "${KAFKA_GROUP}"
+      KAFKA_ADDRESS: "${KAFKA_ADDRESS}"
+    depends_on:
+      db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+        
+  db:
+    container_name: postgres_for_orders
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${DB_USER}"
+      POSTGRES_PASSWORD: "${DB_PASSWORD}"
+      POSTGRES_DB: "${DB_NAME}"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 60s
+
+  kafka:
+    container_name: kafka_for_orders
+    image: bitnami/kafka:4.0.0
+    restart: unless-stopped
+    volumes:
+      - kafka_data:/bitnami/kafka
+    environment:
+      - KAFKA_CFG_NODE_ID=0
+      - KAFKA_CFG_PROCESS_ROLES=controller,broker
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=0@127.0.0.1:${KAFKA_CONTROLLER_PORT}
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:${KAFKA_INTERNAL_PORT},EXTERNAL://:${KAFKA_EXTERNAL_PORT},CONTROLLER://:${KAFKA_CONTROLLER_PORT}
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://${KAFKA_ADDRESS}:${KAFKA_INTERNAL_PORT},EXTERNAL://${KAFKA_ADDRESS}:${KAFKA_EXTERNAL_PORT}
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=false
+    healthcheck:
+      test: [ "CMD-SHELL", "kafka-broker-api-versions.sh --bootstrap-server 127.0.0.1:${KAFKA_INTERNAL_PORT}" ]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 120s
+
+  kafka-init:
+    container_name: kafka_for_orders_init_topics
+    image: bitnami/kafka:4.0.0
+    environment:
+      KAFKA_INTERNAL_PORT: "${KAFKA_INTERNAL_PORT}"
+      KAFKA_TOPIC: "${KAFKA_TOPIC}"
+    command: ["/bin/sh", "-c", "kafka-topics.sh --bootstrap-server $${KAFKA_ADDRESS}:$${KAFKA_INTERNAL_PORT} --create --if-not-exists --topic $${KAFKA_TOPIC} --replication-factor 1 --partitions 1"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  kafka-ui:
+    container_name: kafka_for_orders_UI
+    image: provectuslabs/kafka-ui:v0.7.2
+    restart: unless-stopped
+    ports:
+      - "8088:8080"
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=orders-cluster
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:${KAFKA_INTERNAL_PORT}
+    depends_on:
+      kafka:
+        condition: service_healthy
+    
