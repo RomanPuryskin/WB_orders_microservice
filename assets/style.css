@@ -1,0 +1,13 @@
+#orderIdInput {
+    width: 40%;
+    height: 5%;
+    text-align: center;
+}
+
+.delivery , .payment , .items {
+    margin-left: 40px;
+}
+
+.item {
+    margin-left: 10px;
+}
